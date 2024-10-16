@@ -19,4 +19,9 @@ pub fn main() !void {
     for (models.items) |model| {
         std.debug.print("- {s}\n", .{model});
     }
+
+    // Test chat functionality
+    const message = "Why is the ocean yellow?";
+    std.debug.print("Sending message: '{s}'\n", .{message});
+    try provider.chat(&provider, message, &allocator);
 }

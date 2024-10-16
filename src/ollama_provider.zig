@@ -7,6 +7,34 @@ const ModelList = struct {
     models: []base_provider.Model,
 };
 
+const OllamaMessage = struct {
+    role: []const u8,
+    content: []const u8,
+};
+
+const OllamaStreamingResponse = struct {
+    model: []const u8,
+    created_at: []const u8,
+    message: OllamaMessage,
+    done: bool,
+};
+const OllamaStreamingFinalResponse = struct {
+    model: []const u8,
+    created_at: []const u8,
+    message: OllamaMessage,
+    done: bool,
+    total_duration: u64,
+    load_duration: u64,
+    prompt_eval_duration: u64,
+    eval_count: u64,
+    eval_duration: u64,
+};
+
+const OllamaChatRequest = struct {
+    model: []const u8,
+    messages: [](base_provider.Message),
+};
+
 pub const OllamaLLMProvider = struct {
     base: base_provider.LLMProvider, // Embed the base LLMProvider struct
 
@@ -22,6 +50,7 @@ pub const OllamaLLMProvider = struct {
 
         ollama_provider.base.base_url = try allocator.dupe(u8, env_base_url orelse "");
         ollama_provider.base.refreshModelList = refreshModelList;
+        ollama_provider.base.chat = chat;
         std.debug.print("Base URL: '{s}'\n", .{ollama_provider.base.base_url});
 
         // Initialize the model list by calling listModels
@@ -46,49 +75,85 @@ pub const OllamaLLMProvider = struct {
     }
 
     // Chat with the model using Ollama's API and stream the response
-    pub fn chat(self: *OllamaLLMProvider, message: []const u8, allocator: *std.mem.Allocator) !std.ArrayList([]const u8) {
+    pub fn chat(self: *base_provider.LLMProvider, message: []const u8, allocator: *std.mem.Allocator) base_provider.Error!void {
+        var url_list = try std.ArrayList(u8).initCapacity(allocator.*, self.base_url.len + "/api/chat".len);
+        defer url_list.deinit();
+
+        // Append the base URL and the endpoint
+        try url_list.appendSlice(self.base_url);
+        try url_list.appendSlice("/api/chat");
+
+        const url = try url_list.toOwnedSlice();
+        std.debug.print("Parsing URL: '{s}'\n", .{url});
+        const uri = try std.Uri.parse(url);
+
         // Append the user message to the chat history
-        try self.base.messages.append(.{
+        try self.messages.append(.{
             .role = "user",
             .content = message,
         });
 
-        const url = self.base_url ++ "/api/chat";
-        const payload = self.buildPayload();
+        const chatMessage = OllamaChatRequest{
+            .model = self.model,
+            .messages = self.messages.items,
+        };
 
-        // Placeholder: Make the POST request and stream the response
-        var response = try std.http.Client.post(url, .{
-            .body = payload,
-            .headers = .{},
-            .allocator = allocator,
-        });
+        // Construct JSON payload for the request
+        var payload = std.ArrayList(u8).init(allocator.*);
+        try std.json.stringify(chatMessage, .{ .whitespace = .minified }, payload.writer());
 
-        var final_message = try std.ArrayList([]const u8).init(allocator);
+        const headers_max_size = 1024;
 
-        // Stream response chunks and build the final message
-        while (try response.stream.readChunk()) |chunk| {
-            const json_chunk = try std.json.parse(chunk);
-            if (json_chunk.get("done").toBool()) {
-                break;
-            }
+        var client = std.http.Client{ .allocator = allocator.* };
+        defer client.deinit();
 
-            const content = json_chunk.get("message").get("content").toString();
-            try final_message.append(content);
+        const hbuffer = try allocator.alloc(u8, headers_max_size);
+        defer allocator.free(hbuffer);
+
+        const options = std.http.Client.RequestOptions{ .server_header_buffer = hbuffer, .handle_continue = true };
+
+        // Create a POST request
+        var request = try client.open(std.http.Method.POST, uri, options);
+        defer request.deinit();
+
+        request.transfer_encoding = .chunked;
+
+        // Send and finalize the request
+        _ = try request.send();
+        // Set the request body (payload)
+        try request.writeAll(payload.items);
+        _ = try request.finish();
+        _ = try request.wait();
+
+        // handle bad_request and other errors
+        if (request.response.status != std.http.Status.ok) {
+            return base_provider.Error.WrongStatusResponse;
         }
 
-        // Append the assistant message to the chat history
-        try self.base.messages.append(.{
-            .role = "assistant",
-            .content = final_message.toSlice(),
-        });
+        // Read the response body
+        const buffer = try allocator.alloc(u8, 10000);
+        defer allocator.free(buffer);
 
-        return final_message;
+        var finalMessage = false;
+        var bodyLength: usize = 0;
+
+        while (!finalMessage) {
+            bodyLength = try request.read(buffer);
+            const currentChunk = std.json.parseFromSlice(OllamaStreamingResponse, allocator.*, buffer[0..bodyLength], std.json.ParseOptions{ .ignore_unknown_fields = true }) catch break;
+            defer currentChunk.deinit();
+            std.debug.print("{s}", .{currentChunk.value.message.content});
+            finalMessage = currentChunk.value.done;
+        }
+
+        const finalChunk = try std.json.parseFromSlice(OllamaStreamingFinalResponse, allocator.*, buffer[0..bodyLength], std.json.ParseOptions{ .ignore_unknown_fields = true });
+        std.debug.print("{s}", .{finalChunk.value.message.content});
+        defer finalChunk.deinit();
     }
 
     // Build the payload for chat requests
-    fn buildPayload(self: *OllamaLLMProvider) ![]const u8 {
+    fn buildPayload(_: *base_provider.LLMProvider, _: *std.mem.Allocator) ![]const u8 {
         // Construct JSON payload for the request (you need proper serialization)
-        const payload_str = std.fmt.allocPrint("{ \"model\": \"{}\", \"messages\": {} }", .{ self.base.model, self.base.messages });
+        const payload_str = ""; //try std.fmt.allocPrint(allocator.*, "{ \"model\": \"{}\", \"messages\": {} }", .{ self.model, self.model });
         return payload_str;
     }
 };
@@ -144,4 +209,35 @@ pub fn refreshModelList(self: *base_provider.LLMProvider, allocator: *std.mem.Al
     }
 
     self.models = models_list;
+
+    // if self.model is not set, set it to the first model in the list
+    if (self.model.len == 0) {
+        self.model = self.models.items[0];
+    }
+}
+
+test "init ollama provider" {
+    const expect = std.testing.expect;
+    var allocator = std.heap.page_allocator;
+
+    // Initialize the Ollama LLM provider
+    const primer = "Limit your response to 300 characters or less";
+    var provider = try OllamaLLMProvider.init(&allocator, primer);
+    defer provider.deinit(); // Clean up the provider
+
+    var models = try provider.listModels(&allocator);
+    defer models.deinit(); // Clean up the models list
+    //
+    expect(models.items.len > 0);
+}
+
+test "chat with ollama provider" {
+    const expect = std.testing.expect;
+    var allocator = std.heap.page_allocator;
+    const primer = "Limit your response to 300 characters or less";
+    var provider = try OllamaLLMProvider.init(&allocator, primer);
+    defer provider.deinit(); // Clean up the provider
+    const message = "Why is the ocean yellow?";
+    try provider.chat(&provider, message, &allocator);
+    expect(true);
 }
