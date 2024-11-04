@@ -2,6 +2,8 @@ const std = @import("std");
 const OllamaLLMProvider = @import("ollama_provider.zig").OllamaLLMProvider;
 
 pub fn main() !void {
+    const stdin = std.io.getStdIn().reader();
+    const stdout = std.io.getStdOut().writer();
     var allocator = std.heap.page_allocator;
 
     // Initialize the Ollama LLM provider
@@ -21,7 +23,9 @@ pub fn main() !void {
     }
 
     // Test chat functionality
-    const message = "Why is the ocean yellow?";
+    // ask the user for a message
+    try stdout.print("Enter a message: ", .{});
+    const message = try stdin.readUntilDelimiterAlloc(allocator, '\n', 64000);
     std.debug.print("Sending message: '{s}'\n", .{message});
     try provider.chat(&provider, message, &allocator);
 }
