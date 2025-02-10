@@ -44,13 +44,10 @@ pub fn findEnvVariable(var_name: []const u8, paths: []const []const u8) !?[]cons
             if (pos) |index| {
                 // Assuming format `VAR_NAME=value` and returning the value
                 const value_start = index + var_name.len + 1; // +1 for '='
-                std.debug.print("value_start: {}\n", .{value_start});
 
                 const newline_pos = std.mem.indexOf(u8, env_file[value_start..], "\n");
-                std.debug.print("newline_pos: {?}\n", .{newline_pos});
 
                 const value_end = if (newline_pos) |newline_idx| value_start + newline_idx else env_file.len;
-                std.debug.print("value_end: {}\n", .{value_end});
 
                 if (value_start >= env_file.len or value_start > value_end) {
                     return error.InvalidEnvFileFormat; // Add appropriate error handling
@@ -82,12 +79,10 @@ pub fn findEnvVariable(var_name: []const u8, paths: []const []const u8) !?[]cons
     if (pos) |index| {
         // Assuming format `VAR_NAME=value` and returning the value
         const value_start = index + var_name.len + 1; // +1 for '='
-        std.debug.print("value_start: {}\n", .{value_start});
 
         // Find the newline character or the end of the file
         const newline_pos = std.mem.indexOf(u8, env_file[value_start..], "\n");
         const value_end = if (newline_pos) |newline_idx| value_start + newline_idx else env_file.len;
-        std.debug.print("value_end: {}\n", .{value_end});
 
         if (value_start >= env_file.len or value_start > value_end) {
             return error.InvalidEnvFileFormat; // Add appropriate error handling

@@ -105,9 +105,9 @@ pub const LLMProvider = struct {
         self.models.deinit();
     }
 
-    pub fn new_chat(self: *LLMProvider, primer: []const u8) void {
+    pub fn newChat(self: *LLMProvider, primer: []const u8) !void {
         // Clear messages list
-        self.messages.clear();
+        self.messages.clearAndFree();
 
         // Set primer
         if (primer.len > 0) {
@@ -158,6 +158,7 @@ pub const LLMProvider = struct {
     }
 
     pub fn setModel(self: *LLMProvider, model_name: []const u8) Error!void {
+        std.debug.print("\n*********Requested to change modle to: {s}\n\n\n", .{model_name});
         for (self.models.items) |model| {
             if (std.mem.eql(u8, model, model_name)) {
                 self.model = model;

@@ -51,7 +51,6 @@ pub const OllamaLLMProvider = struct {
         ollama_provider.base.base_url = try allocator.dupe(u8, env_base_url orelse "");
         ollama_provider.base.refreshModelList = refreshModelList;
         ollama_provider.base.chat = chat;
-        std.debug.print("Base URL: '{s}'\n", .{ollama_provider.base.base_url});
 
         // Initialize the model list by calling listModels
         try ollama_provider.base.refreshModelList(&ollama_provider.base, allocator);
@@ -84,13 +83,15 @@ pub const OllamaLLMProvider = struct {
         try url_list.appendSlice("/api/chat");
 
         const url = try url_list.toOwnedSlice();
-        std.debug.print("Parsing URL: '{s}'\n", .{url});
         const uri = try std.Uri.parse(url);
+
+        //copy the message
+        const messageCopy = try allocator.*.dupe(u8, message);
 
         // Append the user message to the chat history
         try self.messages.append(.{
             .role = "user",
-            .content = message,
+            .content = messageCopy,
         });
 
         const chatMessage = OllamaChatRequest{
@@ -127,6 +128,7 @@ pub const OllamaLLMProvider = struct {
 
         // handle bad_request and other errors
         if (request.response.status != std.http.Status.ok) {
+            std.debug.print("status is {}\n", .{request.response.status});
             return base_provider.Error.WrongStatusResponse;
         }
 
@@ -152,8 +154,7 @@ pub const OllamaLLMProvider = struct {
 
     // Build the payload for chat requests
     fn buildPayload(_: *base_provider.LLMProvider, _: *std.mem.Allocator) ![]const u8 {
-        // Construct JSON payload for the request (you need proper serialization)
-        const payload_str = ""; //try std.fmt.allocPrint(allocator.*, "{ \"model\": \"{}\", \"messages\": {} }", .{ self.model, self.model });
+        const payload_str = "";
         return payload_str;
     }
 };
@@ -166,7 +167,6 @@ pub fn refreshModelList(self: *base_provider.LLMProvider, allocator: *std.mem.Al
     try url_list.appendSlice("/api/tags");
 
     const url = try url_list.toOwnedSlice();
-    std.debug.print("Parsing URL: '{s}'\n", .{url});
     const uri = try std.Uri.parse(url);
 
     const headers_max_size = 1024;
@@ -212,7 +212,7 @@ pub fn refreshModelList(self: *base_provider.LLMProvider, allocator: *std.mem.Al
 
     // if self.model is not set, set it to the first model in the list
     if (self.model.len == 0) {
-        self.model = self.models.items[0];
+        self.model = try allocator.*.dupe(u8, self.models.items[0]);
     }
 }
 
